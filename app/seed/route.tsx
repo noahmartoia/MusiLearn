@@ -1,117 +1,95 @@
 import bcrypt from 'bcrypt';
 import postgres from 'postgres';
-import { invoices, customers, revenue, users } from '../lib/placeholder-data';
+import { users } from '../lib/placeholder-data';
 
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
 
 async function seedUsers() {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
+  console.log('Extension uuid-ossp créée');
   await sql`
     CREATE TABLE IF NOT EXISTS users (
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
       email TEXT NOT NULL UNIQUE,
-      password TEXT NOT NULL
+      password TEXT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      role VARCHAR(50) NOT NULL,
+      createdAt TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+  console.log('Table users créée');
 
   const insertedUsers = await Promise.all(
     users.map(async (user) => {
       const hashedPassword = await bcrypt.hash(user.password, 10);
-      return sql`
-        INSERT INTO users (id, name, email, password)
-        VALUES (${user.id}, ${user.name}, ${user.email}, ${hashedPassword})
+      await sql`
+        INSERT INTO users (id, email, password, name, role, createdAt)
+        VALUES (${user.id}, ${user.email}, ${hashedPassword}, ${user.name}, ${user.role}, ${new Date()})
         ON CONFLICT (id) DO NOTHING;
       `;
+      console.log(`Utilisateur inséré : ${user.email}`);
     }),
   );
 
   return insertedUsers;
 }
 
-async function seedInvoices() {
-  await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
-
+async function seedCourses() {
   await sql`
-    CREATE TABLE IF NOT EXISTS invoices (
+    CREATE TABLE IF NOT EXISTS courses (
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-      customer_id UUID NOT NULL,
-      amount INT NOT NULL,
-      status VARCHAR(255) NOT NULL,
-      date DATE NOT NULL
+      title VARCHAR(255) NOT NULL,
+      description TEXT NOT NULL,
+      instrument VARCHAR(50) NOT NULL,
+      teacherId UUID REFERENCES users(id) ON DELETE CASCADE,
+      level VARCHAR(50) NOT NULL,
+      schedule VARCHAR(100) NOT NULL,
+      capacity INT NOT NULL
     );
   `;
-
-  const insertedInvoices = await Promise.all(
-    invoices.map(
-      (invoice) => sql`
-        INSERT INTO invoices (customer_id, amount, status, date)
-        VALUES (${invoice.customer_id}, ${invoice.amount}, ${invoice.status}, ${invoice.date})
-        ON CONFLICT (id) DO NOTHING;
-      `,
-    ),
-  );
-
-  return insertedInvoices;
+  console.log('Table courses créée');
+  // Insérer des cours d'exemple si nécessaire
 }
 
-async function seedCustomers() {
-  await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
-
+async function seedEnrollments() {
   await sql`
-    CREATE TABLE IF NOT EXISTS customers (
+    CREATE TABLE IF NOT EXISTS enrollments (
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      email VARCHAR(255) NOT NULL,
-      image_url VARCHAR(255) NOT NULL
+      studentId UUID REFERENCES users(id) ON DELETE CASCADE,
+      courseId UUID REFERENCES courses(id) ON DELETE CASCADE,
+      enrollmentDate TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status VARCHAR(50) NOT NULL
     );
   `;
-
-  const insertedCustomers = await Promise.all(
-    customers.map(
-      (customer) => sql`
-        INSERT INTO customers (id, name, email, image_url)
-        VALUES (${customer.id}, ${customer.name}, ${customer.email}, ${customer.image_url})
-        ON CONFLICT (id) DO NOTHING;
-      `,
-    ),
-  );
-
-  return insertedCustomers;
+  console.log('Table enrollments créée');
+  // Insérer des inscriptions d'exemple si nécessaire
 }
 
-async function seedRevenue() {
+async function seedProgress() {
   await sql`
-    CREATE TABLE IF NOT EXISTS revenue (
-      month VARCHAR(4) NOT NULL UNIQUE,
-      revenue INT NOT NULL
+    CREATE TABLE IF NOT EXISTS progress (
+      id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+      studentId UUID REFERENCES users(id) ON DELETE CASCADE,
+      courseId UUID REFERENCES courses(id) ON DELETE CASCADE,
+      date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      evaluation TEXT,
+      comments TEXT
     );
   `;
-
-  const insertedRevenue = await Promise.all(
-    revenue.map(
-      (rev) => sql`
-        INSERT INTO revenue (month, revenue)
-        VALUES (${rev.month}, ${rev.revenue})
-        ON CONFLICT (month) DO NOTHING;
-      `,
-    ),
-  );
-
-  return insertedRevenue;
+  console.log('Table progress créée');
+  // Insérer des progressions d'exemple si nécessaire
 }
 
 export async function GET() {
   try {
-    const result = await sql.begin((sql) => [
-      seedUsers(),
-      seedCustomers(),
-      seedInvoices(),
-      seedRevenue(),
-    ]);
+    await seedUsers();
+    await seedCourses();
+    await seedEnrollments();
+    await seedProgress();
 
-    return Response.json({ message: 'Database seeded successfully' });
+    return new Response(JSON.stringify({ message: 'Database seeded successfully' }), { status: 200 });
   } catch (error) {
-    return Response.json({ error }, { status: 500 });
+    console.error('Erreur lors de l\'exécution du seed:', error);
+    return new Response(JSON.stringify({ error: error }), { status: 500 });
   }
 }
